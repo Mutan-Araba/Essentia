@@ -81,7 +81,10 @@ def search_in_milvus(collection, query_embedding, top_k=4):
 def build_context(results, conn):
     """
     根据 Milvus 检索结果，从 PostgreSQL 数据库中查询对应段落，构建上下文。
-    检索结果以去重后的形式返回，标题格式为《宋史 · volume》chapter 段 paragraph：
+    检索结果以去重后的形式返回，标题格式为
+    《宋史 · chapter》段 paragraph：
+    paragraph_text
+    （《宋史》volume）
     """
     seen_paragraphs = set()
     context_parts = []
@@ -102,7 +105,11 @@ def build_context(results, conn):
         paragraph_text = fetch_paragraphs_from_postgres(conn, volume, chapter, paragraph)
         if paragraph_text:
             # 按照指定格式添加段落内容
-            context_parts.append(f"《宋史 · {volume}》{chapter} 段 {paragraph} ：\n{paragraph_text}\n")
+            context_parts.append(f"""
+            据《宋史 · {chapter}》段 {paragraph} 记载：
+            {paragraph_text}
+            (《宋史》{volume})
+            """)
     
     return "\n".join(context_parts)
 
@@ -119,8 +126,18 @@ def generate_answer(question, context):
         str: 模型生成的回答。
     """
     system_prompt = f"""
-    请你仔细阅读相关内容，结合历史资料进行回答，如果发现资料无法得到答案，就回答不知道
-    搜索的相关历史资料如下所示.
+    请你仔细阅读相关内容，结合历史资料进行回答，
+
+    1. 如果问题有明确的史料支持，请按以下格式回答：
+    据 [具体的史料名称或来源] 记载：
+    [仅原样引用该史料中与问题最相关的一句原文]
+
+    [你的回答]
+
+    2. 如果问题无法从提供的资料中找到答案，
+    请回答：“根据现有史料，无法确定答案。”
+
+    搜索的相关历史资料如下所示：
     ---------------------
     {context}
     ---------------------"""
@@ -135,7 +152,7 @@ def generate_answer(question, context):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        max_tokens=200,
+        max_tokens=1000,
         stream=False
     )
     return response.choices[0].message.content.strip()
